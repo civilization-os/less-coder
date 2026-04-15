@@ -9,6 +9,7 @@
 - `local_protocol_v0_examples.md`：协议请求/响应示例
 - `v0_Preview.md`：协议与链路里程碑记录
 - `java_benchmark_set.md`：Java 基准任务集说明
+- `release_pipeline.md`：发布流水线触发与密钥配置
 
 ## 预研与平台文档
 
