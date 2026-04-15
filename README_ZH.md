@@ -49,6 +49,36 @@ lesscoder trace --trace-id <trace_id>
 
 说明：`lesscoder server` 启动前会自动执行内部 warmup。
 
+## MCP 配置
+
+先启动服务：
+
+```bash
+lesscoder server --host 127.0.0.1 --port 8787
+```
+
+然后在 MCP 客户端中配置 `lesscoder` 进程。示例（常见 `mcpServers` 格式）：
+
+```json
+{
+  "mcpServers": {
+    "lesscoder": {
+      "command": "lesscoder",
+      "args": ["server", "--host", "127.0.0.1", "--port", "8787"],
+      "env": {
+        "LESSCODER_HOME": "C:/absolute/path/to/less-coder"
+      }
+    }
+  }
+}
+```
+
+说明：
+
+- MCP 客户端启动目录不固定时，建议设置 `LESSCODER_HOME`。
+- 若 `8787` 端口被占用，需同步修改 server 参数与客户端配置。
+- 当前 adapter 监听 `127.0.0.1:<port>`，协议为本地 protocol v0。
+
 ## 快速验证
 
 ```bash

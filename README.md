@@ -49,6 +49,37 @@ lesscoder trace --trace-id <trace_id>
 
 `lesscoder server` performs internal warmup automatically before serving.
 
+## MCP Setup
+
+Start the service first:
+
+```bash
+lesscoder server --host 127.0.0.1 --port 8787
+```
+
+Then configure your MCP client to launch `lesscoder` as a local server process.
+Example config (common `mcpServers` format):
+
+```json
+{
+  "mcpServers": {
+    "lesscoder": {
+      "command": "lesscoder",
+      "args": ["server", "--host", "127.0.0.1", "--port", "8787"],
+      "env": {
+        "LESSCODER_HOME": "/absolute/path/to/less-coder"
+      }
+    }
+  }
+}
+```
+
+Notes:
+
+- Use `LESSCODER_HOME` when the client may start from an arbitrary working directory.
+- If port `8787` is already occupied, change it in both server args and client settings.
+- Current adapter endpoint is `127.0.0.1:<port>` with local protocol v0.
+
 ## Quick Validation
 
 ```bash
