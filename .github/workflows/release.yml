@@ -46,6 +46,43 @@ jobs:
           python -m pip install --upgrade pip
           pip install pytest
 
+      - name: Validate Tag and Package Versions
+        env:
+          GITHUB_REF: ${{ github.ref }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          PUBLISH_REGISTRY: ${{ github.event.inputs.publish_registry || 'false' }}
+        run: |
+          python - <<'PY'
+          import json
+          import re
+          import tomllib
+          from pathlib import Path
+          import os
+
+          pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+          package = json.loads(Path("package.json").read_text(encoding="utf-8"))
+
+          py_ver = str(pyproject.get("project", {}).get("version", "")).strip()
+          npm_ver = str(package.get("version", "")).strip()
+          if not py_ver or not npm_ver:
+              raise SystemExit("Missing version in pyproject.toml or package.json")
+          if py_ver != npm_ver:
+              raise SystemExit(f"Version mismatch: pyproject={py_ver}, package.json={npm_ver}")
+
+          ref = os.environ.get("GITHUB_REF", "")
+          if ref.startswith("refs/tags/"):
+              tag = ref.rsplit("/", 1)[-1]
+              if not re.fullmatch(r"v\d+\.\d+\.\d+", tag):
+                  raise SystemExit(f"Invalid tag format: {tag} (expected vMAJOR.MINOR.PATCH)")
+              expected = tag[1:]
+              if expected != py_ver:
+                  raise SystemExit(
+                      f"Tag/version mismatch: tag={tag}, pyproject={py_ver}, package.json={npm_ver}"
+                  )
+
+          print(f"Version gate passed: {py_ver}")
+          PY
+
       - name: Run integration tests
         run: |
           pytest -q tests/integration
