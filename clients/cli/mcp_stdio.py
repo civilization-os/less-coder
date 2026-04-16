@@ -16,12 +16,12 @@ class BridgeConfig:
 
 def run_stdio_bridge(config: BridgeConfig) -> int:
     while True:
-        req = _read_mcp_message(sys.stdin.buffer)
+        req, mode = _read_mcp_message(sys.stdin.buffer)
         if req is None:
             return 0
         resp = handle_mcp_request(req, config)
         if resp is not None:
-            _write_mcp_message(sys.stdout.buffer, resp)
+            _write_mcp_message(sys.stdout.buffer, resp, mode=mode)
             sys.stdout.buffer.flush()
 
 
@@ -156,12 +156,24 @@ def _mcp_error(req_id: Any, code: int, message: str) -> dict[str, Any]:
     return {"jsonrpc": "2.0", "id": req_id, "error": {"code": code, "message": message}}
 
 
-def _read_mcp_message(stream) -> dict[str, Any] | None:
+def _read_mcp_message(stream) -> tuple[dict[str, Any] | None, str]:
     content_length = None
+    first_line = stream.readline()
+    if first_line == b"":
+        return None, "framed"
+
+    # Compatibility mode: some clients may send newline-delimited JSON-RPC.
+    stripped = first_line.strip()
+    if stripped.startswith(b"{") and stripped.endswith(b"}"):
+        try:
+            return json.loads(stripped.decode("utf-8")), "ndjson"
+        except json.JSONDecodeError:
+            return None, "ndjson"
+
+    line = first_line
     while True:
-        line = stream.readline()
         if line == b"":
-            return None
+            return None, "framed"
         if line in (b"\r\n", b"\n"):
             break
         lower = line.lower()
@@ -169,20 +181,24 @@ def _read_mcp_message(stream) -> dict[str, Any] | None:
             try:
                 content_length = int(line.split(b":", 1)[1].strip())
             except ValueError:
-                return None
+                return None, "framed"
+        line = stream.readline()
     if content_length is None or content_length <= 0:
-        return None
+        return None, "framed"
     body = stream.read(content_length)
     if len(body) != content_length:
-        return None
+        return None, "framed"
     try:
-        return json.loads(body.decode("utf-8"))
+        return json.loads(body.decode("utf-8")), "framed"
     except json.JSONDecodeError:
-        return None
+        return None, "framed"
 
 
-def _write_mcp_message(stream, payload: dict[str, Any]) -> None:
+def _write_mcp_message(stream, payload: dict[str, Any], mode: str = "framed") -> None:
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    if mode == "ndjson":
+        stream.write(body + b"\n")
+        return
     header = f"Content-Length: {len(body)}\r\n\r\n".encode("ascii")
     stream.write(header)
     stream.write(body)

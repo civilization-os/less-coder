@@ -1,6 +1,7 @@
 import json
+from io import BytesIO
 
-from clients.cli.mcp_stdio import BridgeConfig, handle_mcp_request
+from clients.cli.mcp_stdio import BridgeConfig, _read_mcp_message, _write_mcp_message, handle_mcp_request
 
 
 def test_initialize_returns_capabilities():
@@ -60,3 +61,20 @@ def test_tools_call_wraps_adapter_response(monkeypatch):
     parsed = json.loads(content)
     assert parsed["status"] == "ok"
     assert parsed["action"] == "system.health"
+
+
+def test_read_mcp_message_supports_ndjson():
+    stream = BytesIO(b'{"jsonrpc":"2.0","id":1,"method":"ping"}\n')
+    req, mode = _read_mcp_message(stream)
+    assert mode == "ndjson"
+    assert req is not None
+    assert req["method"] == "ping"
+
+
+def test_write_mcp_message_ndjson_mode():
+    out = BytesIO()
+    _write_mcp_message(out, {"jsonrpc": "2.0", "id": 1, "result": {}}, mode="ndjson")
+    payload = out.getvalue().decode("utf-8").strip()
+    assert payload.startswith("{")
+    parsed = json.loads(payload)
+    assert parsed["id"] == 1
