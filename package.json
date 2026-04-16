@@ -1,6 +1,6 @@
 {
   "name": "@civilization/lesscoder",
-  "version": "0.1.3",
+  "version": "0.1.5",
   "description": "LessCoder CLI wrapper for Code-Native Engine MVP",
   "license": "UNLICENSED",
   "bin": {
