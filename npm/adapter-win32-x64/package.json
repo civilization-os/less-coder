@@ -1,6 +1,6 @@
 {
   "name": "@civilization/lesscoder-adapter-win32-x64",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "description": "Windows x64 adapter binary package for lesscoder",
   "license": "UNLICENSED",
   "os": [

@@ -102,36 +102,44 @@ def _tool_specs() -> list[dict[str, Any]]:
         _tool("repo_map", "Call adapter action repo.map"),
         _tool(
             "symbol_lookup",
-            "Call adapter action symbol.lookup (requires active project)",
+            "Call adapter action symbol.lookup (requires project.activate OR project_root/path per call)",
             properties={
                 "symbol": {"type": "string", "description": "Symbol name to lookup"},
+                "project_root": {"type": "string", "description": "Project root path for stateless clients"},
+                "path": {"type": "string", "description": "Alias of project_root"},
             },
             required=["symbol"],
         ),
         _tool(
             "symbol_resolve",
-            "Call adapter action symbol.resolve (requires active project)",
+            "Call adapter action symbol.resolve (requires project.activate OR project_root/path per call)",
             properties={
                 "symbol": {"type": "string", "description": "Symbol name to resolve"},
+                "project_root": {"type": "string", "description": "Project root path for stateless clients"},
+                "path": {"type": "string", "description": "Alias of project_root"},
             },
             required=["symbol"],
         ),
         _tool(
             "symbol_lookup_fuzzy",
-            "Call adapter action symbol.lookup.fuzzy (requires active project)",
+            "Call adapter action symbol.lookup.fuzzy (requires project.activate OR project_root/path per call)",
             properties={
                 "symbol": {"type": "string", "description": "Symbol keyword for fuzzy lookup"},
                 "limit": {"type": "integer", "description": "Max candidate count (default: 10)"},
+                "project_root": {"type": "string", "description": "Project root path for stateless clients"},
+                "path": {"type": "string", "description": "Alias of project_root"},
             },
             required=["symbol"],
         ),
         _tool(
             "graph_calls",
-            "Call adapter action graph.calls (requires active project)",
+            "Call adapter action graph.calls (requires project.activate OR project_root/path per call)",
             properties={
                 "symbol": {"type": "string", "description": "Root symbol for call graph"},
                 "depth": {"type": "integer", "description": "Optional traversal depth"},
                 "language": {"type": "string", "description": "Optional language hint (e.g. typescript/java)"},
+                "project_root": {"type": "string", "description": "Project root path for stateless clients"},
+                "path": {"type": "string", "description": "Alias of project_root"},
             },
             required=["symbol"],
         ),

@@ -535,6 +535,7 @@ fn system_health_payload(active_project: Option<String>) -> Value {
             "category": "system",
             "requires_warmup": false,
             "requires_project_activation": false,
+            "requires_project_context": false,
             "available": true,
             "description": "service health and capability listing",
         }),
@@ -543,6 +544,7 @@ fn system_health_payload(active_project: Option<String>) -> Value {
             "category": "system",
             "requires_warmup": false,
             "requires_project_activation": false,
+            "requires_project_context": false,
             "available": true,
             "description": "bind active project root to current session/trace context",
         }),
@@ -551,6 +553,7 @@ fn system_health_payload(active_project: Option<String>) -> Value {
             "category": "system",
             "requires_warmup": false,
             "requires_project_activation": false,
+            "requires_project_context": false,
             "available": true,
             "description": "preheat runtime and semantic index",
         }),
@@ -559,6 +562,7 @@ fn system_health_payload(active_project: Option<String>) -> Value {
             "category": "context",
             "requires_warmup": false,
             "requires_project_activation": false,
+            "requires_project_context": false,
             "available": true,
             "description": "repository skeleton map",
         }),
@@ -567,38 +571,43 @@ fn system_health_payload(active_project: Option<String>) -> Value {
             "category": "context",
             "requires_warmup": true,
             "requires_project_activation": true,
+            "requires_project_context": true,
             "available": true,
-            "description": "symbol resolution (LSP preferred)",
+            "description": "symbol resolution (LSP preferred); requires project context via project.activate OR project_root/path",
         }),
         json!({
             "action": "symbol.lookup.static",
             "category": "context",
             "requires_warmup": true,
             "requires_project_activation": true,
+            "requires_project_context": true,
             "available": true,
-            "description": "symbol resolution from static index",
+            "description": "symbol resolution from static index; requires project context via project.activate OR project_root/path",
         }),
         json!({
             "action": "symbol.resolve",
             "category": "context",
             "requires_warmup": true,
             "requires_project_activation": true,
+            "requires_project_context": true,
             "available": true,
-            "description": "canonical symbol resolve alias",
+            "description": "canonical symbol resolve alias; requires project context via project.activate OR project_root/path",
         }),
         json!({
             "action": "symbol.lookup.fuzzy",
             "category": "context",
             "requires_warmup": true,
             "requires_project_activation": true,
+            "requires_project_context": true,
             "available": true,
-            "description": "fuzzy symbol lookup (prefix/contains ranking)",
+            "description": "fuzzy symbol lookup (prefix/contains ranking); requires project context via project.activate OR project_root/path",
         }),
         json!({
             "action": "patch.apply",
             "category": "edit",
             "requires_warmup": false,
             "requires_project_activation": false,
+            "requires_project_context": false,
             "available": true,
             "description": "apply search/replace patch",
         }),
@@ -607,8 +616,9 @@ fn system_health_payload(active_project: Option<String>) -> Value {
             "category": "graph",
             "requires_warmup": true,
             "requires_project_activation": true,
+            "requires_project_context": true,
             "available": true,
-            "description": "call graph query",
+            "description": "call graph query; requires project context via project.activate OR project_root/path",
         }),
     ];
 
@@ -623,7 +633,7 @@ fn system_health_payload(active_project: Option<String>) -> Value {
     let requires_activation_count = methods
         .iter()
         .filter(|m| {
-            m.get("requires_project_activation")
+            m.get("requires_project_context")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false)
         })
@@ -639,6 +649,7 @@ fn system_health_payload(active_project: Option<String>) -> Value {
         "summary": {
             "total_methods": 10,
             "requires_warmup_methods": requires_warmup_count,
+            "requires_project_context_methods": requires_activation_count,
             "requires_project_activation_methods": requires_activation_count,
         }
     })
@@ -910,15 +921,24 @@ fn project_activation_required_response(req: RequestEnvelope, action: &str) -> R
     error_response(
         req,
         "COMMON_PRECONDITION_REQUIRED",
-        "method requires active project context",
+        "method requires project context",
         false,
         "Adapter",
         json!({
             "action": action,
-            "next_action": "project.activate",
+            "next_action": "pass project_root/path in this call, or call project.activate first",
+            "preferred": "provide project_root/path in current request",
+            "alternatives": ["project.activate"],
+            "requires_project_context": true,
             "example": {
-                "action": "project.activate",
-                "payload": {"project_root": "<project-root>"}
+                "direct_call": {
+                    "action": action,
+                    "payload": {"symbol": "<symbol>", "project_root": "<project-root>"}
+                },
+                "activate_then_call": {
+                    "action": "project.activate",
+                    "payload": {"project_root": "<project-root>"}
+                }
             }
         }),
     )
@@ -1001,7 +1021,7 @@ mod tests {
             .expect("project.activate method missing");
         assert_eq!(
             project_activate
-                .get("requires_project_activation")
+                .get("requires_project_context")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(true),
             false
@@ -1213,7 +1233,7 @@ mod tests {
         assert_eq!(err.code, "COMMON_PRECONDITION_REQUIRED");
         assert_eq!(
             err.details.get("next_action").and_then(|v| v.as_str()),
-            Some("project.activate")
+            Some("pass project_root/path in this call, or call project.activate first")
         );
     }
 
@@ -1235,6 +1255,41 @@ mod tests {
         let mut lookup_req = req("symbol.lookup");
         lookup_req.payload = json!({"symbol": "normalizeName"});
         let resp = route_action(lookup_req);
+        assert_eq!(resp.status, "ok");
+    }
+
+    #[test]
+    fn symbol_lookup_with_project_root_works_without_active_context() {
+        let _guard = TEST_LOCK.lock().expect("test lock poisoned");
+        WARMED_UP.store(true, Ordering::SeqCst);
+        clear_warmup_snapshots();
+        clear_active_projects();
+
+        let root = Path::new("../../..").join("fixtures").join("java-sample");
+        let mut lookup_req = req("symbol.lookup");
+        lookup_req.payload = json!({
+            "symbol": "normalizeName",
+            "project_root": root.to_string_lossy().to_string(),
+        });
+        let resp = route_action(lookup_req);
+        assert_eq!(resp.status, "ok");
+    }
+
+    #[test]
+    fn graph_calls_with_project_root_works_without_active_context() {
+        let _guard = TEST_LOCK.lock().expect("test lock poisoned");
+        WARMED_UP.store(true, Ordering::SeqCst);
+        clear_warmup_snapshots();
+        clear_active_projects();
+
+        let root = Path::new("../../..").join("fixtures").join("java-sample");
+        let mut req_graph = req("graph.calls");
+        req_graph.payload = json!({
+            "symbol": "normalizeName",
+            "language": "java",
+            "project_root": root.to_string_lossy().to_string(),
+        });
+        let resp = route_action(req_graph);
         assert_eq!(resp.status, "ok");
     }
 

@@ -28,11 +28,20 @@ def test_tools_list_contains_system_health():
     assert "project_root" in warmup["inputSchema"]["properties"]
     symbol_lookup = next(t for t in tools if t["name"] == "symbol_lookup")
     assert "symbol" in symbol_lookup["inputSchema"]["properties"]
+    assert "project_root" in symbol_lookup["inputSchema"]["properties"]
+    assert "path" in symbol_lookup["inputSchema"]["properties"]
+    symbol_resolve = next(t for t in tools if t["name"] == "symbol_resolve")
+    assert "project_root" in symbol_resolve["inputSchema"]["properties"]
+    assert "path" in symbol_resolve["inputSchema"]["properties"]
     symbol_lookup_fuzzy = next(t for t in tools if t["name"] == "symbol_lookup_fuzzy")
     assert "symbol" in symbol_lookup_fuzzy["inputSchema"]["properties"]
     assert "limit" in symbol_lookup_fuzzy["inputSchema"]["properties"]
+    assert "project_root" in symbol_lookup_fuzzy["inputSchema"]["properties"]
+    assert "path" in symbol_lookup_fuzzy["inputSchema"]["properties"]
     graph_calls = next(t for t in tools if t["name"] == "graph_calls")
     assert "language" in graph_calls["inputSchema"]["properties"]
+    assert "project_root" in graph_calls["inputSchema"]["properties"]
+    assert "path" in graph_calls["inputSchema"]["properties"]
 
 
 def test_tools_call_unknown_returns_error():
@@ -115,6 +124,31 @@ def test_tools_call_project_activate_maps_to_adapter_action(monkeypatch):
     parsed = json.loads(content)
     assert parsed["status"] == "ok"
     assert parsed["action"] == "project.activate"
+
+
+def test_tools_call_symbol_lookup_with_project_root_passthrough(monkeypatch):
+    def fake_call(_cfg, action, payload):
+        return {"status": "ok", "action": action, "payload": payload}
+
+    from clients.cli import mcp_stdio
+
+    monkeypatch.setattr(mcp_stdio, "_call_adapter", fake_call)
+    req = {
+        "jsonrpc": "2.0",
+        "id": 7,
+        "method": "tools/call",
+        "params": {
+            "name": "symbol_lookup",
+            "arguments": {"symbol": "foo", "project_root": "C:/repo/demo"},
+        },
+    }
+    resp = handle_mcp_request(req, BridgeConfig())
+    assert resp is not None
+    content = resp["result"]["content"][0]["text"]
+    parsed = json.loads(content)
+    assert parsed["status"] == "ok"
+    assert parsed["action"] == "symbol.lookup"
+    assert parsed["payload"]["project_root"] == "C:/repo/demo"
 
 
 def test_read_mcp_message_supports_ndjson():
