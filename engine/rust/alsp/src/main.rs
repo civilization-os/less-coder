@@ -15,7 +15,10 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let root = args.get(1).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
+    let root = args
+        .get(1)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
     let map = build_java_repo_map(&root)?;
     println!("{}", serde_json::to_string_pretty(&map)?);
     Ok(())

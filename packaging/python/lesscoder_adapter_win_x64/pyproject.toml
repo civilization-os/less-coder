@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lesscoder-adapter-win-x64"
-version = "0.1.10"
+version = "0.1.11"
 description = "Windows x64 adapter binary package for lesscoder."
 readme = "README.md"
 requires-python = ">=3.11"

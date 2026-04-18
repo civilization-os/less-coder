@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lesscoder"
-version = "0.1.10"
+version = "0.1.11"
 description = "Code-Native Engine MVP CLI (Java-focused) with local orchestrator and adapter workflow."
 readme = "README.md"
 requires-python = ">=3.11"

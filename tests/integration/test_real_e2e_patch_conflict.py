@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 from orchestrator.langgraph_orchestrator import run_real_chain
+from tests.integration.e2e_adapter import start_adapter_process
 
 
 def _pick_free_port() -> int:
@@ -38,21 +39,7 @@ def test_real_e2e_patch_search_miss_enters_repair():
         target_file = fixture_root / "src" / "main" / "java" / "com" / "acme" / "NameService.java"
 
         port = _pick_free_port()
-        env = os.environ.copy()
-        env["ALSP_ADAPTER_ADDR"] = f"127.0.0.1:{port}"
-        proc = subprocess.Popen(
-            [
-                "cargo",
-                "run",
-                "--manifest-path",
-                str(root / "engine" / "rust" / "alsp_adapter" / "Cargo.toml"),
-                "--bin",
-                "alsp_adapter",
-                "--quiet",
-            ],
-            cwd=str(root),
-            env=env,
-        )
+        proc = start_adapter_process(root, "127.0.0.1", port)
         try:
             _wait_for_port("127.0.0.1", port, timeout_s=30.0)
             mvn_cmd = "mvn.cmd" if os.name == "nt" else "mvn"
@@ -92,21 +79,7 @@ def test_real_e2e_patch_conflict_enters_repair():
         target_file = fixture_root / "src" / "main" / "java" / "com" / "acme" / "NameService.java"
 
         port = _pick_free_port()
-        env = os.environ.copy()
-        env["ALSP_ADAPTER_ADDR"] = f"127.0.0.1:{port}"
-        proc = subprocess.Popen(
-            [
-                "cargo",
-                "run",
-                "--manifest-path",
-                str(root / "engine" / "rust" / "alsp_adapter" / "Cargo.toml"),
-                "--bin",
-                "alsp_adapter",
-                "--quiet",
-            ],
-            cwd=str(root),
-            env=env,
-        )
+        proc = start_adapter_process(root, "127.0.0.1", port)
         try:
             _wait_for_port("127.0.0.1", port, timeout_s=30.0)
             mvn_cmd = "mvn.cmd" if os.name == "nt" else "mvn"

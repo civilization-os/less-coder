@@ -3,6 +3,7 @@ import socket
 import sys
 import uuid
 from dataclasses import dataclass
+from dataclasses import field
 from importlib import metadata as importlib_metadata
 from typing import Any
 
@@ -12,6 +13,7 @@ class BridgeConfig:
     adapter_host: str = "127.0.0.1"
     adapter_port: int = 8787
     timeout_ms: int = 30_000
+    session_id: str = field(default_factory=lambda: f"sess_{uuid.uuid4().hex[:12]}")
 
 
 def run_stdio_bridge(config: BridgeConfig) -> int:
@@ -80,6 +82,14 @@ def _tool_specs() -> list[dict[str, Any]]:
     return [
         _tool("system_health", "Call adapter action system.health"),
         _tool(
+            "project_activate",
+            "Activate project context for subsequent warmup-dependent tools",
+            properties={
+                "project_root": {"type": "string", "description": "Absolute project root path"},
+            },
+            required=["project_root"],
+        ),
+        _tool(
             "system_warmup",
             "Call adapter action system.warmup",
             properties={
@@ -92,7 +102,7 @@ def _tool_specs() -> list[dict[str, Any]]:
         _tool("repo_map", "Call adapter action repo.map"),
         _tool(
             "symbol_lookup",
-            "Call adapter action symbol.lookup",
+            "Call adapter action symbol.lookup (requires active project)",
             properties={
                 "symbol": {"type": "string", "description": "Symbol name to lookup"},
             },
@@ -100,18 +110,28 @@ def _tool_specs() -> list[dict[str, Any]]:
         ),
         _tool(
             "symbol_resolve",
-            "Call adapter action symbol.resolve",
+            "Call adapter action symbol.resolve (requires active project)",
             properties={
                 "symbol": {"type": "string", "description": "Symbol name to resolve"},
             },
             required=["symbol"],
         ),
         _tool(
+            "symbol_lookup_fuzzy",
+            "Call adapter action symbol.lookup.fuzzy (requires active project)",
+            properties={
+                "symbol": {"type": "string", "description": "Symbol keyword for fuzzy lookup"},
+                "limit": {"type": "integer", "description": "Max candidate count (default: 10)"},
+            },
+            required=["symbol"],
+        ),
+        _tool(
             "graph_calls",
-            "Call adapter action graph.calls",
+            "Call adapter action graph.calls (requires active project)",
             properties={
                 "symbol": {"type": "string", "description": "Root symbol for call graph"},
                 "depth": {"type": "integer", "description": "Optional traversal depth"},
+                "language": {"type": "string", "description": "Optional language hint (e.g. typescript/java)"},
             },
             required=["symbol"],
         ),
@@ -153,10 +173,12 @@ def _tool(
 def _tool_to_action(name: str) -> str | None:
     return {
         "system_health": "system.health",
+        "project_activate": "project.activate",
         "system_warmup": "system.warmup",
         "repo_map": "repo.map",
         "symbol_lookup": "symbol.lookup",
         "symbol_resolve": "symbol.resolve",
+        "symbol_lookup_fuzzy": "symbol.lookup.fuzzy",
         "graph_calls": "graph.calls",
         "patch_apply": "patch.apply",
     }.get(name)
@@ -167,7 +189,7 @@ def _call_adapter(config: BridgeConfig, action: str, payload: dict[str, Any]) ->
         "version": "v0",
         "request_id": f"req_{uuid.uuid4().hex[:12]}",
         "trace_id": f"tr_mcp_{uuid.uuid4().hex[:10]}",
-        "session_id": None,
+        "session_id": config.session_id,
         "source": "mcp_stdio_bridge",
         "target": "alsp_adapter",
         "action": action,

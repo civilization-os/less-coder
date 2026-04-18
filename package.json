@@ -1,6 +1,6 @@
 {
   "name": "@civilization/lesscoder",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "description": "LessCoder CLI wrapper for Code-Native Engine MVP",
   "license": "UNLICENSED",
   "bin": {
@@ -24,7 +24,7 @@
     "test": "node -e \"console.log('no npm tests configured')\""
   },
   "optionalDependencies": {
-    "@civilization/lesscoder-adapter-win32-x64": "0.1.10"
+    "@civilization/lesscoder-adapter-win32-x64": "0.1.11"
   },
   "keywords": [
     "lesscoder",

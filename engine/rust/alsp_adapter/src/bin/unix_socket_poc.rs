@@ -47,8 +47,8 @@ struct ResponseEnvelope {
 #[cfg(unix)]
 #[tokio::main]
 async fn main() -> Result<()> {
-    let socket_path =
-        std::env::var("ALSP_ADAPTER_SOCK").unwrap_or_else(|_| "/tmp/alsp_adapter_v0.sock".to_string());
+    let socket_path = std::env::var("ALSP_ADAPTER_SOCK")
+        .unwrap_or_else(|_| "/tmp/alsp_adapter_v0.sock".to_string());
     let _ = std::fs::remove_file(&socket_path);
     let listener = UnixListener::bind(&socket_path)?;
     println!("unix-socket poc listening on {socket_path}");

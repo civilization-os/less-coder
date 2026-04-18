@@ -20,11 +20,19 @@ def test_tools_list_contains_system_health():
     tools = resp["result"]["tools"]
     names = [t["name"] for t in tools]
     assert "system_health" in names
+    assert "project_activate" in names
     assert "system_warmup" in names
+    activate = next(t for t in tools if t["name"] == "project_activate")
+    assert "project_root" in activate["inputSchema"]["properties"]
     warmup = next(t for t in tools if t["name"] == "system_warmup")
     assert "project_root" in warmup["inputSchema"]["properties"]
     symbol_lookup = next(t for t in tools if t["name"] == "symbol_lookup")
     assert "symbol" in symbol_lookup["inputSchema"]["properties"]
+    symbol_lookup_fuzzy = next(t for t in tools if t["name"] == "symbol_lookup_fuzzy")
+    assert "symbol" in symbol_lookup_fuzzy["inputSchema"]["properties"]
+    assert "limit" in symbol_lookup_fuzzy["inputSchema"]["properties"]
+    graph_calls = next(t for t in tools if t["name"] == "graph_calls")
+    assert "language" in graph_calls["inputSchema"]["properties"]
 
 
 def test_tools_call_unknown_returns_error():
@@ -65,6 +73,48 @@ def test_tools_call_wraps_adapter_response(monkeypatch):
     parsed = json.loads(content)
     assert parsed["status"] == "ok"
     assert parsed["action"] == "system.health"
+
+
+def test_tools_call_symbol_lookup_fuzzy_maps_to_adapter_action(monkeypatch):
+    def fake_call(_cfg, action, payload):
+        return {"status": "ok", "action": action, "payload": payload}
+
+    from clients.cli import mcp_stdio
+
+    monkeypatch.setattr(mcp_stdio, "_call_adapter", fake_call)
+    req = {
+        "jsonrpc": "2.0",
+        "id": 5,
+        "method": "tools/call",
+        "params": {"name": "symbol_lookup_fuzzy", "arguments": {"symbol": "Name", "limit": 10}},
+    }
+    resp = handle_mcp_request(req, BridgeConfig())
+    assert resp is not None
+    content = resp["result"]["content"][0]["text"]
+    parsed = json.loads(content)
+    assert parsed["status"] == "ok"
+    assert parsed["action"] == "symbol.lookup.fuzzy"
+
+
+def test_tools_call_project_activate_maps_to_adapter_action(monkeypatch):
+    def fake_call(_cfg, action, payload):
+        return {"status": "ok", "action": action, "payload": payload}
+
+    from clients.cli import mcp_stdio
+
+    monkeypatch.setattr(mcp_stdio, "_call_adapter", fake_call)
+    req = {
+        "jsonrpc": "2.0",
+        "id": 6,
+        "method": "tools/call",
+        "params": {"name": "project_activate", "arguments": {"project_root": "C:/work/project"}},
+    }
+    resp = handle_mcp_request(req, BridgeConfig())
+    assert resp is not None
+    content = resp["result"]["content"][0]["text"]
+    parsed = json.loads(content)
+    assert parsed["status"] == "ok"
+    assert parsed["action"] == "project.activate"
 
 
 def test_read_mcp_message_supports_ndjson():
