@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lesscoder-adapter-win-x64"
+version = "0.1.8"
+description = "Windows x64 adapter binary package for lesscoder."
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "lesscoder team" }]
+license = { text = "Proprietary" }
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Operating System :: Microsoft :: Windows",
+]
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["lesscoder_adapter_win_x64*"]
+
+[tool.setuptools.package-data]
+lesscoder_adapter_win_x64 = ["bin/*.exe"]

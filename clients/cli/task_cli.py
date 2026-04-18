@@ -105,6 +105,29 @@ def build_parser(prog: str = "task") -> argparse.ArgumentParser:
         help="optional release tag to verify (e.g. v0.1.0)",
     )
 
+    release_cut = sub.add_parser(
+        "release-cut",
+        help="cut a release: bump versions, commit, tag (optionally push)",
+    )
+    release_cut.add_argument(
+        "--project-root",
+        default=".",
+        dest="project_root",
+        help="repository root path",
+    )
+    release_cut.add_argument(
+        "--version",
+        required=True,
+        dest="version",
+        help="semantic version, e.g. 0.1.8",
+    )
+    release_cut.add_argument(
+        "--push",
+        action="store_true",
+        dest="push",
+        help="push main and tag after commit",
+    )
+
     mcp_parser = sub.add_parser("mcp", help="run stdio MCP bridge")
     mcp_parser.add_argument("--adapter-host", default="127.0.0.1", dest="adapter_host")
     mcp_parser.add_argument("--adapter-port", default=8787, type=int, dest="adapter_port")
@@ -288,6 +311,15 @@ def main(argv: list[str] | None = None, prog: str = "task") -> int:
             project_root=Path(args.project_root).expanduser().resolve(),
             skip_tests=bool(args.skip_tests),
             tag=args.tag,
+        )
+        print(json.dumps(result, ensure_ascii=False))
+        return 0 if result["status"] == "ok" else int(result.get("exit_code", 2))
+
+    if args.command == "release-cut":
+        result = _run_release_cut(
+            project_root=Path(args.project_root).expanduser().resolve(),
+            version=str(args.version).strip(),
+            push=bool(args.push),
         )
         print(json.dumps(result, ensure_ascii=False))
         return 0 if result["status"] == "ok" else int(result.get("exit_code", 2))
@@ -519,6 +551,22 @@ def _run_release_dry_run(project_root: Path, skip_tests: bool, tag: str | None) 
             "exit_code": int(py_step.get("exit_code", 1)),
         }
 
+    py_adapter_step = _run_step(
+        name="python_build_adapter_win_x64",
+        command=[sys.executable, "-m", "build", "packaging/python/lesscoder_adapter_win_x64"],
+        cwd=project_root,
+    )
+    steps.append(py_adapter_step)
+    if py_adapter_step["status"] != "ok":
+        return {
+            "status": "error",
+            "error_code": "RELEASE_DRY_RUN_FAILED",
+            "message": "python adapter build failed",
+            "versions": version_check["versions"],
+            "steps": steps,
+            "exit_code": int(py_adapter_step.get("exit_code", 1)),
+        }
+
     npm_step = _run_step(
         name="npm_pack",
         command=[npm_exe, "pack"],
@@ -533,6 +581,22 @@ def _run_release_dry_run(project_root: Path, skip_tests: bool, tag: str | None) 
             "versions": version_check["versions"],
             "steps": steps,
             "exit_code": int(npm_step.get("exit_code", 1)),
+        }
+
+    npm_adapter_step = _run_step(
+        name="npm_pack_adapter_win32_x64",
+        command=[npm_exe, "pack"],
+        cwd=project_root / "npm" / "adapter-win32-x64",
+    )
+    steps.append(npm_adapter_step)
+    if npm_adapter_step["status"] != "ok":
+        return {
+            "status": "error",
+            "error_code": "RELEASE_DRY_RUN_FAILED",
+            "message": "npm adapter pack failed",
+            "versions": version_check["versions"],
+            "steps": steps,
+            "exit_code": int(npm_adapter_step.get("exit_code", 1)),
         }
 
     rust_step = _run_step(
@@ -569,59 +633,234 @@ def _run_release_dry_run(project_root: Path, skip_tests: bool, tag: str | None) 
     }
 
 
-def _validate_release_versions(project_root: Path, tag: str | None) -> dict[str, object]:
+def _run_release_cut(project_root: Path, version: str, push: bool) -> dict[str, object]:
+    if not project_root.exists():
+        return {
+            "status": "error",
+            "error_code": "COMMON_BAD_REQUEST",
+            "message": f"project root not found: {project_root}",
+            "exit_code": 2,
+        }
+    if not re.fullmatch(r"\d+\.\d+\.\d+", version):
+        return {
+            "status": "error",
+            "error_code": "COMMON_BAD_REQUEST",
+            "message": f"invalid version format: {version} (expected MAJOR.MINOR.PATCH)",
+            "exit_code": 2,
+        }
+
     pyproject_path = project_root / "pyproject.toml"
     package_json_path = project_root / "package.json"
-
-    if not pyproject_path.exists() or not package_json_path.exists():
+    py_adapter_path = project_root / "packaging" / "python" / "lesscoder_adapter_win_x64" / "pyproject.toml"
+    npm_adapter_path = project_root / "npm" / "adapter-win32-x64" / "package.json"
+    if (
+        not pyproject_path.exists()
+        or not package_json_path.exists()
+        or not py_adapter_path.exists()
+        or not npm_adapter_path.exists()
+    ):
         return {
             "status": "error",
             "error_code": "COMMON_PRECONDITION_REQUIRED",
-            "message": "pyproject.toml or package.json not found in project root",
+            "message": "release version manifests not found in project root",
+            "exit_code": 2,
+        }
+
+    py_text = pyproject_path.read_text(encoding="utf-8")
+    if not re.search(r'(?m)^version\s*=\s*"\d+\.\d+\.\d+"\s*$', py_text):
+        return {
+            "status": "error",
+            "error_code": "COMMON_BAD_REQUEST",
+            "message": "cannot locate project version in pyproject.toml",
+            "exit_code": 2,
+        }
+    py_text_new = re.sub(
+        r'(?m)^version\s*=\s*"\d+\.\d+\.\d+"\s*$',
+        f'version = "{version}"',
+        py_text,
+        count=1,
+    )
+    pyproject_path.write_text(py_text_new, encoding="utf-8")
+
+    package_data = json.loads(package_json_path.read_text(encoding="utf-8"))
+    package_data["version"] = version
+    optional_deps = package_data.get("optionalDependencies")
+    if not isinstance(optional_deps, dict):
+        optional_deps = {}
+    optional_deps["@civilization/lesscoder-adapter-win32-x64"] = version
+    package_data["optionalDependencies"] = optional_deps
+    package_json_path.write_text(json.dumps(package_data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    py_adapter_text = py_adapter_path.read_text(encoding="utf-8")
+    if not re.search(r'(?m)^version\s*=\s*"\d+\.\d+\.\d+"\s*$', py_adapter_text):
+        return {
+            "status": "error",
+            "error_code": "COMMON_BAD_REQUEST",
+            "message": "cannot locate project version in adapter pyproject.toml",
+            "exit_code": 2,
+        }
+    py_adapter_text_new = re.sub(
+        r'(?m)^version\s*=\s*"\d+\.\d+\.\d+"\s*$',
+        f'version = "{version}"',
+        py_adapter_text,
+        count=1,
+    )
+    py_adapter_path.write_text(py_adapter_text_new, encoding="utf-8")
+
+    npm_adapter_data = json.loads(npm_adapter_path.read_text(encoding="utf-8"))
+    npm_adapter_data["version"] = version
+    npm_adapter_path.write_text(json.dumps(npm_adapter_data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    steps: list[dict[str, object]] = []
+    commit_msg = f"chore(release): bump version to {version}"
+    tag = f"v{version}"
+    commands = [
+        [
+            "git",
+            "add",
+            "pyproject.toml",
+            "package.json",
+            "packaging/python/lesscoder_adapter_win_x64/pyproject.toml",
+            "npm/adapter-win32-x64/package.json",
+        ],
+        ["git", "commit", "-m", commit_msg],
+        ["git", "tag", tag],
+    ]
+    if push:
+        commands.extend(
+            [
+                ["git", "push", "origin", "main"],
+                ["git", "push", "origin", tag],
+            ]
+        )
+
+    for cmd in commands:
+        step = _run_step(name=f"git:{' '.join(cmd[1:])}", command=cmd, cwd=project_root)
+        steps.append(step)
+        if step["status"] != "ok":
+            return {
+                "status": "error",
+                "error_code": "RELEASE_CUT_FAILED",
+                "message": f"release cut failed at step: {' '.join(cmd)}",
+                "version": version,
+                "tag": tag,
+                "steps": steps,
+                "exit_code": int(step.get("exit_code", 1)),
+            }
+
+    return {
+        "status": "ok",
+        "message": "release cut completed",
+        "version": version,
+        "tag": tag,
+        "steps": steps,
+        "exit_code": 0,
+    }
+
+
+def _validate_release_versions(project_root: Path, tag: str | None) -> dict[str, object]:
+    pyproject_path = project_root / "pyproject.toml"
+    package_json_path = project_root / "package.json"
+    py_adapter_path = project_root / "packaging" / "python" / "lesscoder_adapter_win_x64" / "pyproject.toml"
+    npm_adapter_path = project_root / "npm" / "adapter-win32-x64" / "package.json"
+
+    if not pyproject_path.exists() or not package_json_path.exists() or not py_adapter_path.exists() or not npm_adapter_path.exists():
+        return {
+            "status": "error",
+            "error_code": "COMMON_PRECONDITION_REQUIRED",
+            "message": "version manifests not found in project root",
         }
 
     with pyproject_path.open("rb") as f:
         pyproject = tomllib.load(f)
     with package_json_path.open("r", encoding="utf-8") as f:
         package_json = json.load(f)
+    with py_adapter_path.open("rb") as f:
+        py_adapter_project = tomllib.load(f)
+    with npm_adapter_path.open("r", encoding="utf-8") as f:
+        npm_adapter_package = json.load(f)
 
     py_ver = str(pyproject.get("project", {}).get("version", "")).strip()
     npm_ver = str(package_json.get("version", "")).strip()
-    if not py_ver or not npm_ver:
+    py_adapter_ver = str(py_adapter_project.get("project", {}).get("version", "")).strip()
+    npm_adapter_ver = str(npm_adapter_package.get("version", "")).strip()
+    optional_deps = package_json.get("optionalDependencies", {})
+    npm_optional_adapter_ver = str(optional_deps.get("@civilization/lesscoder-adapter-win32-x64", "")).strip()
+    if not py_ver or not npm_ver or not py_adapter_ver or not npm_adapter_ver:
         return {
             "status": "error",
             "error_code": "COMMON_BAD_REQUEST",
-            "message": "missing version in pyproject.toml or package.json",
+            "message": "missing version in one or more manifests",
         }
 
-    if py_ver != npm_ver:
+    if not npm_optional_adapter_ver:
+        return {
+            "status": "error",
+            "error_code": "COMMON_BAD_REQUEST",
+            "message": "missing @civilization/lesscoder-adapter-win32-x64 in optionalDependencies",
+            "versions": {
+                "python": py_ver,
+                "npm": npm_ver,
+                "python_adapter_win_x64": py_adapter_ver,
+                "npm_adapter_win32_x64": npm_adapter_ver,
+            },
+        }
+
+    if py_ver != npm_ver or py_ver != py_adapter_ver or py_ver != npm_adapter_ver or py_ver != npm_optional_adapter_ver:
         return {
             "status": "error",
             "error_code": "RELEASE_VERSION_MISMATCH",
-            "message": "python and npm versions are not aligned",
-            "versions": {"python": py_ver, "npm": npm_ver},
+            "message": "package versions are not aligned",
+            "versions": {
+                "python": py_ver,
+                "npm": npm_ver,
+                "python_adapter_win_x64": py_adapter_ver,
+                "npm_adapter_win32_x64": npm_adapter_ver,
+                "npm_optional_adapter_win32_x64": npm_optional_adapter_ver,
+            },
         }
 
     if tag:
         normalized = tag.strip()
         if not re.fullmatch(r"v\d+\.\d+\.\d+", normalized):
-            return {
-                "status": "error",
-                "error_code": "COMMON_BAD_REQUEST",
-                "message": "tag format must be vMAJOR.MINOR.PATCH",
-                "versions": {"python": py_ver, "npm": npm_ver, "tag": normalized},
-            }
+                return {
+                    "status": "error",
+                    "error_code": "COMMON_BAD_REQUEST",
+                    "message": "tag format must be vMAJOR.MINOR.PATCH",
+                    "versions": {
+                        "python": py_ver,
+                        "npm": npm_ver,
+                        "python_adapter_win_x64": py_adapter_ver,
+                        "npm_adapter_win32_x64": npm_adapter_ver,
+                        "npm_optional_adapter_win32_x64": npm_optional_adapter_ver,
+                        "tag": normalized,
+                    },
+                }
         if normalized[1:] != py_ver:
             return {
                 "status": "error",
                 "error_code": "RELEASE_VERSION_MISMATCH",
                 "message": "tag version does not match project version",
-                "versions": {"python": py_ver, "npm": npm_ver, "tag": normalized},
+                "versions": {
+                    "python": py_ver,
+                    "npm": npm_ver,
+                    "python_adapter_win_x64": py_adapter_ver,
+                    "npm_adapter_win32_x64": npm_adapter_ver,
+                    "npm_optional_adapter_win32_x64": npm_optional_adapter_ver,
+                    "tag": normalized,
+                },
             }
 
     return {
         "status": "ok",
-        "versions": {"python": py_ver, "npm": npm_ver, "tag": tag.strip() if tag else None},
+        "versions": {
+            "python": py_ver,
+            "npm": npm_ver,
+            "python_adapter_win_x64": py_adapter_ver,
+            "npm_adapter_win32_x64": npm_adapter_ver,
+            "npm_optional_adapter_win32_x64": npm_optional_adapter_ver,
+            "tag": tag.strip() if tag else None,
+        },
     }
 
 
@@ -708,6 +947,12 @@ def _resolve_adapter_binary() -> tuple[str | None, dict[str, object]]:
         if p.exists():
             return str(p), {"source": "env", "tried": tried}
 
+    packaged = _packaged_adapter_path()
+    if packaged:
+        tried.append(str(packaged))
+        if packaged.exists():
+            return str(packaged), {"source": "package", "tried": tried}
+
     bundled = _bundled_adapter_path()
     if bundled:
         tried.append(str(bundled))
@@ -726,6 +971,22 @@ def _resolve_adapter_binary() -> tuple[str | None, dict[str, object]]:
     if downloaded:
         return str(downloaded), {"source": "download", "tried": tried, "download": download_meta}
     return None, {"source": "none", "tried": tried, "download": download_meta}
+
+
+def _packaged_adapter_path() -> Path | None:
+    if not sys.platform.startswith("win"):
+        return None
+    try:
+        import lesscoder_adapter_win_x64  # type: ignore
+    except ImportError:
+        return None
+    get_path = getattr(lesscoder_adapter_win_x64, "get_adapter_binary_path", None)
+    if not callable(get_path):
+        return None
+    resolved = get_path()
+    if not resolved:
+        return None
+    return Path(resolved).expanduser().resolve()
 
 
 def _bundled_adapter_path() -> Path | None:

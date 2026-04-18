@@ -1,17 +1,30 @@
 {
   "name": "@civilization/lesscoder",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "LessCoder CLI wrapper for Code-Native Engine MVP",
   "license": "UNLICENSED",
   "bin": {
     "lesscoder": "npm/lesscoder.js"
   },
+  "files": [
+    "clients/**/*.py",
+    "orchestrator/**/*.py",
+    "npm/lesscoder.js",
+    "README.md",
+    "README_ZH.md",
+    "LICENSE",
+    "lesscoder.cmd",
+    "pyproject.toml"
+  ],
   "engines": {
     "node": ">=18.0.0"
   },
   "scripts": {
     "lint": "node -e \"console.log('no lint configured')\"",
     "test": "node -e \"console.log('no npm tests configured')\""
+  },
+  "optionalDependencies": {
+    "@civilization/lesscoder-adapter-win32-x64": "0.1.8"
   },
   "keywords": [
     "lesscoder",

@@ -61,13 +61,27 @@ jobs:
 
           pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
           package = json.loads(Path("package.json").read_text(encoding="utf-8"))
+          py_adapter = tomllib.loads(
+              Path("packaging/python/lesscoder_adapter_win_x64/pyproject.toml").read_text(encoding="utf-8")
+          )
+          npm_adapter = json.loads(Path("npm/adapter-win32-x64/package.json").read_text(encoding="utf-8"))
 
           py_ver = str(pyproject.get("project", {}).get("version", "")).strip()
           npm_ver = str(package.get("version", "")).strip()
-          if not py_ver or not npm_ver:
-              raise SystemExit("Missing version in pyproject.toml or package.json")
-          if py_ver != npm_ver:
-              raise SystemExit(f"Version mismatch: pyproject={py_ver}, package.json={npm_ver}")
+          py_adapter_ver = str(py_adapter.get("project", {}).get("version", "")).strip()
+          npm_adapter_ver = str(npm_adapter.get("version", "")).strip()
+          npm_optional_adapter_ver = str(
+              package.get("optionalDependencies", {}).get("@civilization/lesscoder-adapter-win32-x64", "")
+          ).strip()
+          if not py_ver or not npm_ver or not py_adapter_ver or not npm_adapter_ver or not npm_optional_adapter_ver:
+              raise SystemExit("Missing version in one or more package manifests")
+          versions = {py_ver, npm_ver, py_adapter_ver, npm_adapter_ver, npm_optional_adapter_ver}
+          if len(versions) != 1:
+              raise SystemExit(
+                  "Version mismatch across packages: "
+                  f"py={py_ver}, npm={npm_ver}, py_adapter={py_adapter_ver}, "
+                  f"npm_adapter={npm_adapter_ver}, npm_optional_adapter={npm_optional_adapter_ver}"
+              )
 
           ref = os.environ.get("GITHUB_REF", "")
           if ref.startswith("refs/tags/"):
@@ -77,7 +91,10 @@ jobs:
               expected = tag[1:]
               if expected != py_ver:
                   raise SystemExit(
-                      f"Tag/version mismatch: tag={tag}, pyproject={py_ver}, package.json={npm_ver}"
+                      "Tag/version mismatch: "
+                      f"tag={tag}, pyproject={py_ver}, package.json={npm_ver}, "
+                      f"py_adapter={py_adapter_ver}, npm_adapter={npm_adapter_ver}, "
+                      f"npm_optional_adapter={npm_optional_adapter_ver}"
                   )
 
           print(f"Version gate passed: {py_ver}")
@@ -88,7 +105,9 @@ jobs:
           pytest -q tests/integration
 
   build-python:
-    needs: verify
+    needs:
+      - verify
+      - build-rust-adapter
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -99,20 +118,41 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Download Windows adapter artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: alsp-adapter-windows
+          path: adapter-artifacts/windows
+
+      - name: Prepare Python adapter package binary
+        run: |
+          mkdir -p packaging/python/lesscoder_adapter_win_x64/src/lesscoder_adapter_win_x64/bin
+          cp "adapter-artifacts/windows/alsp_adapter_windows_x86_64.exe" \
+             "packaging/python/lesscoder_adapter_win_x64/src/lesscoder_adapter_win_x64/bin/alsp_adapter.exe"
+
       - name: Build Python distributions
         run: |
           python -m pip install --upgrade pip
           pip install build
           python -m build
+          python -m build packaging/python/lesscoder_adapter_win_x64
 
-      - name: Upload python dist artifact
+      - name: Upload python main dist artifact
         uses: actions/upload-artifact@v4
         with:
-          name: python-dist
-          path: dist/*
+          name: python-main-dist
+          path: dist/lesscoder-*
+
+      - name: Upload python adapter dist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-adapter-dist
+          path: packaging/python/lesscoder_adapter_win_x64/dist/*
 
   build-npm:
-    needs: verify
+    needs:
+      - verify
+      - build-rust-adapter
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -123,15 +163,31 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Pack npm tarball
+      - name: Download Windows adapter artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: alsp-adapter-windows
+          path: adapter-artifacts/windows
+
+      - name: Prepare npm adapter package binary
         run: |
+          mkdir -p npm/adapter-win32-x64/bin
+          cp "adapter-artifacts/windows/alsp_adapter_windows_x86_64.exe" \
+             "npm/adapter-win32-x64/bin/alsp_adapter.exe"
+
+      - name: Pack npm tarballs
+        run: |
+          npm pack
+          cd npm/adapter-win32-x64
           npm pack
 
       - name: Upload npm tarball artifact
         uses: actions/upload-artifact@v4
         with:
           name: npm-tarball
-          path: "*.tgz"
+          path: |
+            *.tgz
+            npm/adapter-win32-x64/*.tgz
 
   build-rust-adapter:
     needs: verify
@@ -255,10 +311,16 @@ jobs:
     env:
       HAS_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN != '' }}
     steps:
-      - name: Download python dist artifact
+      - name: Download python main dist artifact
         uses: actions/download-artifact@v4
         with:
-          name: python-dist
+          name: python-main-dist
+          path: dist
+
+      - name: Download python adapter dist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: python-adapter-dist
           path: dist
 
       - name: Publish to PyPI
@@ -298,12 +360,18 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          TARBALL=$(ls ./npm-dist/*.tgz | head -n 1)
-          if [ -z "$TARBALL" ]; then
-            echo "No npm tarball found under ./npm-dist"
+          ADAPTER_TARBALL=$(ls ./npm-dist/*lesscoder-adapter-win32-x64*.tgz | head -n 1)
+          MAIN_TARBALL=$(ls ./npm-dist/*lesscoder*.tgz | grep -v lesscoder-adapter-win32-x64 | head -n 1)
+          if [ -z "$ADAPTER_TARBALL" ]; then
+            echo "Adapter npm tarball not found under ./npm-dist"
             exit 1
           fi
-          npm publish "$TARBALL" --access public
+          if [ -z "$MAIN_TARBALL" ]; then
+            echo "Main npm tarball not found under ./npm-dist"
+            exit 1
+          fi
+          npm publish "$ADAPTER_TARBALL" --access public
+          npm publish "$MAIN_TARBALL" --access public
 
       - name: Skip npm publish (missing secret)
         if: ${{ env.HAS_NPM_TOKEN != 'true' }}

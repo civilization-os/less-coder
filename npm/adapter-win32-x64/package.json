@@ -1,0 +1,17 @@
+{
+  "name": "@civilization/lesscoder-adapter-win32-x64",
+  "version": "0.1.8",
+  "description": "Windows x64 adapter binary package for lesscoder",
+  "license": "UNLICENSED",
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "files": [
+    "index.js",
+    "bin/alsp_adapter.exe"
+  ],
+  "main": "index.js"
+}

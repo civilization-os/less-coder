@@ -19,7 +19,7 @@ This repository provides an end-to-end loop:
 - Python `3.11+`
 - Java `17+`
 - Maven `3.9+`
-- Rust toolchain (currently required for `lesscoder server`)
+- Rust toolchain (development/source mode only)
 
 ## Install
 
@@ -38,13 +38,20 @@ pip install -e .
 
 The npm package is a CLI wrapper that invokes the Python runtime.
 
+Windows x64 install path now uses hybrid adapter resolution:
+- prefer prebuilt adapter from architecture package:
+  - PyPI: `lesscoder-adapter-win-x64`
+  - npm: `@civilization/lesscoder-adapter-win32-x64` (optional dependency)
+- fallback to cache and GitHub Release download when architecture package is unavailable
+
 `lesscoder server` runtime mode:
 - Dev mode: if local Rust manifest exists, use `cargo run`.
 - Installed mode: if no manifest, resolve adapter binary from:
   - `LESSCODER_ADAPTER_BIN`
+  - installed architecture package binary (Windows x64)
   - bundled binary (if packaged)
   - local cache `~/.lesscoder/adapter/...`
-  - GitHub Release auto-download (default repo: `MoCuishlei/less-coder`)
+  - GitHub Release auto-download (default repo: `civilization-os/less-coder`)
   - checksum verify via `lesscoder_adapter_manifest.json` when available
 
 ## Run

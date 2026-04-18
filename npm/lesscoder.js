@@ -2,18 +2,37 @@
 "use strict";
 
 const { spawnSync } = require("node:child_process");
+const fs = require("node:fs");
 const path = require("node:path");
 
 const repoRoot = path.resolve(__dirname, "..");
 const args = process.argv.slice(2);
 
 function runPython(cmd, cmdArgs) {
+  const env = { ...process.env };
+  const adapterBin = resolveOptionalAdapterPath();
+  if (!env.LESSCODER_ADAPTER_BIN && adapterBin) {
+    env.LESSCODER_ADAPTER_BIN = adapterBin;
+  }
   return spawnSync(cmd, cmdArgs, {
     cwd: repoRoot,
     stdio: "inherit",
-    env: process.env,
+    env,
     shell: false,
   });
+}
+
+function resolveOptionalAdapterPath() {
+  try {
+    const adapterPkg = require("@civilization/lesscoder-adapter-win32-x64");
+    const candidate = adapterPkg && adapterPkg.adapterPath;
+    if (typeof candidate === "string" && candidate.length > 0 && fs.existsSync(candidate)) {
+      return candidate;
+    }
+  } catch (_err) {
+    // optional dependency may not be installed on non-win32/x64 platforms
+  }
+  return null;
 }
 
 function main() {

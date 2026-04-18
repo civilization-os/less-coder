@@ -223,7 +223,13 @@ def test_release_dry_run_success_with_skip_tests(monkeypatch, capsys):
     assert code == 0
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["status"] == "ok"
-    assert steps == ["python_build", "npm_pack", "cargo_release_build"]
+    assert steps == [
+        "python_build",
+        "python_build_adapter_win_x64",
+        "npm_pack",
+        "npm_pack_adapter_win32_x64",
+        "cargo_release_build",
+    ]
 
 
 def test_release_dry_run_blocks_on_version_mismatch(monkeypatch, capsys):
@@ -242,8 +248,14 @@ def test_release_dry_run_blocks_on_version_mismatch(monkeypatch, capsys):
         lambda _root, _tag: {
             "status": "error",
             "error_code": "RELEASE_VERSION_MISMATCH",
-            "message": "python and npm versions are not aligned",
-            "versions": {"python": "0.1.0", "npm": "0.2.0"},
+            "message": "package versions are not aligned",
+            "versions": {
+                "python": "0.1.0",
+                "npm": "0.2.0",
+                "python_adapter_win_x64": "0.1.0",
+                "npm_adapter_win32_x64": "0.1.0",
+                "npm_optional_adapter_win32_x64": "0.2.0",
+            },
         },
     )
     code = task_cli.main(
@@ -368,3 +380,140 @@ def test_download_adapter_falls_back_to_predictable_asset(monkeypatch, tmp_path)
     assert calls["asset"] >= 1
     assert meta["status"] == "ok"
     assert meta["stage"] == "asset_download_direct"
+
+
+def test_release_cut_rejects_invalid_version(capsys):
+    code = task_cli.main(
+        ["release-cut", "--project-root", str(Path(task_cli.__file__).resolve().parents[2]), "--version", "0.1"],
+        prog="lesscoder",
+    )
+    assert code == 2
+    payload = json.loads(capsys.readouterr().out.strip())
+    assert payload["status"] == "error"
+    assert payload["error_code"] == "COMMON_BAD_REQUEST"
+
+
+def test_release_cut_updates_version_and_runs_git_steps(monkeypatch, tmp_path, capsys):
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "lesscoder"\nversion = "0.1.0"\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "package.json").write_text(
+        json.dumps(
+            {
+                "name": "@civilization/lesscoder",
+                "version": "0.1.0",
+                "optionalDependencies": {"@civilization/lesscoder-adapter-win32-x64": "0.1.0"},
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    adapter_pyproject = tmp_path / "packaging" / "python" / "lesscoder_adapter_win_x64" / "pyproject.toml"
+    adapter_pyproject.parent.mkdir(parents=True, exist_ok=True)
+    adapter_pyproject.write_text(
+        '[project]\nname = "lesscoder-adapter-win-x64"\nversion = "0.1.0"\n',
+        encoding="utf-8",
+    )
+    adapter_npm = tmp_path / "npm" / "adapter-win32-x64" / "package.json"
+    adapter_npm.parent.mkdir(parents=True, exist_ok=True)
+    adapter_npm.write_text(
+        json.dumps({"name": "@civilization/lesscoder-adapter-win32-x64", "version": "0.1.0"}, ensure_ascii=False, indent=2)
+        + "\n",
+        encoding="utf-8",
+    )
+    calls = []
+
+    def fake_run_step(name, command, cwd):
+        calls.append({"name": name, "command": command, "cwd": cwd})
+        return {"name": name, "status": "ok", "exit_code": 0, "command": command}
+
+    monkeypatch.setattr(task_cli, "_run_step", fake_run_step)
+    code = task_cli.main(
+        ["release-cut", "--project-root", str(tmp_path), "--version", "0.1.8"],
+        prog="lesscoder",
+    )
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out.strip())
+    assert payload["status"] == "ok"
+    assert payload["tag"] == "v0.1.8"
+    assert len(calls) == 3
+    assert calls[0]["command"] == [
+        "git",
+        "add",
+        "pyproject.toml",
+        "package.json",
+        "packaging/python/lesscoder_adapter_win_x64/pyproject.toml",
+        "npm/adapter-win32-x64/package.json",
+    ]
+    assert calls[1]["command"] == ["git", "commit", "-m", "chore(release): bump version to 0.1.8"]
+    assert calls[2]["command"] == ["git", "tag", "v0.1.8"]
+
+    pyproject_new = (tmp_path / "pyproject.toml").read_text(encoding="utf-8")
+    package_new = json.loads((tmp_path / "package.json").read_text(encoding="utf-8"))
+    adapter_pyproject_new = adapter_pyproject.read_text(encoding="utf-8")
+    adapter_npm_new = json.loads(adapter_npm.read_text(encoding="utf-8"))
+    assert 'version = "0.1.8"' in pyproject_new
+    assert package_new["version"] == "0.1.8"
+    assert package_new["optionalDependencies"]["@civilization/lesscoder-adapter-win32-x64"] == "0.1.8"
+    assert 'version = "0.1.8"' in adapter_pyproject_new
+    assert adapter_npm_new["version"] == "0.1.8"
+
+
+def test_resolve_adapter_binary_prefers_packaged_module(monkeypatch, tmp_path):
+    adapter_exe = tmp_path / "alsp_adapter.exe"
+    adapter_exe.write_bytes(b"adapter")
+
+    class FakePackage:
+        @staticmethod
+        def get_adapter_binary_path():
+            return str(adapter_exe)
+
+    monkeypatch.setattr(task_cli.sys, "platform", "win32")
+    monkeypatch.setitem(task_cli.sys.modules, "lesscoder_adapter_win_x64", FakePackage)
+    monkeypatch.delenv("LESSCODER_ADAPTER_BIN", raising=False)
+    monkeypatch.setattr(task_cli, "_bundled_adapter_path", lambda: tmp_path / "missing_bundled.exe")
+    monkeypatch.setattr(task_cli, "_cached_adapter_path", lambda: tmp_path / "missing_cache.exe")
+
+    resolved, meta = task_cli._resolve_adapter_binary()
+    assert resolved == str(adapter_exe)
+    assert meta["source"] == "package"
+
+
+def test_validate_release_versions_checks_adapter_versions(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "lesscoder"\nversion = "0.1.7"\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "package.json").write_text(
+        json.dumps(
+            {
+                "name": "@civilization/lesscoder",
+                "version": "0.1.7",
+                "optionalDependencies": {"@civilization/lesscoder-adapter-win32-x64": "0.1.7"},
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    py_adapter = tmp_path / "packaging" / "python" / "lesscoder_adapter_win_x64" / "pyproject.toml"
+    py_adapter.parent.mkdir(parents=True, exist_ok=True)
+    py_adapter.write_text(
+        '[project]\nname = "lesscoder-adapter-win-x64"\nversion = "0.1.8"\n',
+        encoding="utf-8",
+    )
+    npm_adapter = tmp_path / "npm" / "adapter-win32-x64" / "package.json"
+    npm_adapter.parent.mkdir(parents=True, exist_ok=True)
+    npm_adapter.write_text(
+        json.dumps({"name": "@civilization/lesscoder-adapter-win32-x64", "version": "0.1.7"}, ensure_ascii=False, indent=2)
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = task_cli._validate_release_versions(tmp_path, None)
+    assert result["status"] == "error"
+    assert result["error_code"] == "RELEASE_VERSION_MISMATCH"
