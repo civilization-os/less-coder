@@ -21,6 +21,10 @@ def test_tools_list_contains_system_health():
     names = [t["name"] for t in tools]
     assert "system_health" in names
     assert "system_warmup" in names
+    warmup = next(t for t in tools if t["name"] == "system_warmup")
+    assert "project_root" in warmup["inputSchema"]["properties"]
+    symbol_lookup = next(t for t in tools if t["name"] == "symbol_lookup")
+    assert "symbol" in symbol_lookup["inputSchema"]["properties"]
 
 
 def test_tools_call_unknown_returns_error():

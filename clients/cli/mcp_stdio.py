@@ -79,22 +79,71 @@ def _version() -> str:
 def _tool_specs() -> list[dict[str, Any]]:
     return [
         _tool("system_health", "Call adapter action system.health"),
-        _tool("system_warmup", "Call adapter action system.warmup", required=["project_root"]),
+        _tool(
+            "system_warmup",
+            "Call adapter action system.warmup",
+            properties={
+                "project_root": {"type": "string", "description": "Absolute project root path"},
+                "manifest_path": {"type": "string", "description": "Optional Cargo.toml path"},
+                "skip_build": {"type": "boolean", "description": "Skip cargo build during warmup"},
+            },
+            required=["project_root"],
+        ),
         _tool("repo_map", "Call adapter action repo.map"),
-        _tool("symbol_lookup", "Call adapter action symbol.lookup", required=["symbol"]),
-        _tool("symbol_resolve", "Call adapter action symbol.resolve", required=["symbol"]),
-        _tool("graph_calls", "Call adapter action graph.calls", required=["symbol"]),
-        _tool("patch_apply", "Call adapter action patch.apply", required=["target", "search_replace_blocks"]),
+        _tool(
+            "symbol_lookup",
+            "Call adapter action symbol.lookup",
+            properties={
+                "symbol": {"type": "string", "description": "Symbol name to lookup"},
+            },
+            required=["symbol"],
+        ),
+        _tool(
+            "symbol_resolve",
+            "Call adapter action symbol.resolve",
+            properties={
+                "symbol": {"type": "string", "description": "Symbol name to resolve"},
+            },
+            required=["symbol"],
+        ),
+        _tool(
+            "graph_calls",
+            "Call adapter action graph.calls",
+            properties={
+                "symbol": {"type": "string", "description": "Root symbol for call graph"},
+                "depth": {"type": "integer", "description": "Optional traversal depth"},
+            },
+            required=["symbol"],
+        ),
+        _tool(
+            "patch_apply",
+            "Call adapter action patch.apply",
+            properties={
+                "target": {"type": "string", "description": "Target file path"},
+                "search_replace_blocks": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": "Array of SEARCH/REPLACE patch blocks",
+                },
+                "backup": {"type": "boolean", "description": "Create backup before apply"},
+            },
+            required=["target", "search_replace_blocks"],
+        ),
     ]
 
 
-def _tool(name: str, description: str, required: list[str] | None = None) -> dict[str, Any]:
+def _tool(
+    name: str,
+    description: str,
+    properties: dict[str, Any] | None = None,
+    required: list[str] | None = None,
+) -> dict[str, Any]:
     return {
         "name": name,
         "description": description,
         "inputSchema": {
             "type": "object",
-            "properties": {},
+            "properties": properties or {},
             "required": required or [],
             "additionalProperties": True,
         },
